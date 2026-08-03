@@ -1,0 +1,5 @@
+-r requirements.txt
+jax[cuda12]>=0.6,<1
+# NeurAI's published GPU/CPU packages currently document only Python 3.8/3.9.
+# Do not install them into this maintained application environment; use the
+# isolated legacy container described in README.md if NeurAI API validation is required.
