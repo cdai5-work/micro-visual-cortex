@@ -4,6 +4,8 @@ import numpy as np
 from cortex_demo import StimulusConfig, simulate
 from cortex_demo.model import MODEL
 from cortex_demo.stimuli import generate_stimulus, poisson_encode
+from cortex_demo.decoder import decode_image, train_default_decoder
+from cortex_demo.shapes import generate_shape
 
 
 class StimulusTests(unittest.TestCase):
@@ -54,6 +56,30 @@ class ModelTests(unittest.TestCase):
             result = simulate(StimulusConfig(kind, noise=0, duration_ms=50, seed=8))
             self.assertEqual(result.v1_spikes.shape, (50, 128))
             self.assertEqual(set(result.group_rates_hz), {0, 45, 90, 135})
+
+
+class DecoderTests(unittest.TestCase):
+    def test_generated_shapes_are_bounded(self):
+        for direction in ("up", "down", "left", "right"):
+            for sharpness in ("sharp", "rounded"):
+                for completeness in ("complete", "open"):
+                    image = generate_shape(direction, sharpness, completeness, seed=3)
+                    self.assertEqual(image.shape, (16, 16))
+                    self.assertGreaterEqual(float(image.min()), 0)
+                    self.assertLessEqual(float(image.max()), 1)
+
+    def test_decoder_meets_validation_targets(self):
+        decoder = train_default_decoder(samples=1200)
+        self.assertGreaterEqual(decoder.metrics["direction"], .95)
+        self.assertGreaterEqual(decoder.metrics["sharpness"], .90)
+        self.assertGreaterEqual(decoder.metrics["completeness"], .85)
+
+    def test_decoder_reads_spikes_and_returns_all_heads(self):
+        image = generate_shape("left", "sharp", "complete", noise=0, seed=11)
+        prediction, spikes, _ = decode_image(image, seed=11)
+        self.assertEqual(spikes.shape, (300, 256))
+        self.assertIn(prediction.direction, ("up", "down", "left", "right"))
+        self.assertEqual(set(prediction.confidence), {"direction", "sharpness", "completeness"})
 
 
 if __name__ == "__main__":

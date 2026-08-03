@@ -5,6 +5,7 @@ import numpy as np
 
 from .api import SimulationResult
 from .settings import NEURONS_PER_GROUP, ORIENTATIONS
+from .decoder import DecoderPrediction
 
 
 def stimulus_figure(result: SimulationResult):
@@ -56,6 +57,20 @@ def heatmap_figure(result: SimulationResult):
     ax.set_yticks(range(4), [f"{o}°" for o in ORIENTATIONS])
     ax.set(xlabel="时间 (ms)", ylabel="偏好方向", title="群体活动热图")
     fig.colorbar(im, ax=ax, label="瞬时活动")
+    fig.tight_layout()
+    return fig
+
+
+def decoder_confidence_figure(prediction: DecoderPrediction):
+    labels = ["方向", "尖锐度", "完整性"]
+    values = [prediction.confidence["direction"], prediction.confidence["sharpness"],
+              prediction.confidence["completeness"]]
+    fig, ax = plt.subplots(figsize=(5, 2.8))
+    bars = ax.barh(labels, values, color=["#22d3ee", "#a78bfa", "#34d399"])
+    ax.bar_label(bars, labels=[f"{value:.1%}" for value in values], padding=3)
+    ax.set_xlim(0, 1.08)
+    ax.set_xlabel("置信度")
+    ax.set_title("可训练Decoder输出")
     fig.tight_layout()
     return fig
 
