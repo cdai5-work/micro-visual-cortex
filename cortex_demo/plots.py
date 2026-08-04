@@ -11,6 +11,23 @@ from .settings import NEURONS_PER_GROUP, ORIENTATIONS
 from .decoder import DecoderPrediction, spike_activity_maps
 
 
+def visual_input_figure(image: np.ndarray):
+    """Render a tiny 16×16 stimulus crisply without browser image upscaling artifacts."""
+    fig, ax = plt.subplots(figsize=(4.5, 4.5))
+    shown = ax.imshow(image, cmap="gray", vmin=0, vmax=1, interpolation="nearest")
+    ax.set_title("送入视网膜的16×16视觉刺激")
+    ax.set_xlabel("水平像素")
+    ax.set_ylabel("垂直像素")
+    ax.set_xticks(np.arange(-.5, 16, 1), minor=True)
+    ax.set_yticks(np.arange(-.5, 16, 1), minor=True)
+    ax.grid(which="minor", color="#64748b", linewidth=.25, alpha=.35)
+    ax.tick_params(which="minor", bottom=False, left=False)
+    ax.set_aspect("equal")
+    fig.colorbar(shown, ax=ax, fraction=.046, pad=.04, label="亮度")
+    fig.tight_layout()
+    return fig
+
+
 def stimulus_figure(result: SimulationResult):
     fig, ax = plt.subplots(figsize=(4, 4))
     ax.imshow(result.stimulus, cmap="magma", vmin=0, vmax=1, interpolation="nearest")

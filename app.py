@@ -6,7 +6,7 @@ from cortex_demo import decode_multimodal, generate_shape, validate_decoder_caus
 from cortex_demo.plots import (
     causal_validation_figure, decoder_activity_figure, decoder_confidence_figure,
     decoder_edge_maps_figure, decoder_raster_figure, decoder_v1_raster_figure,
-    tactile_activity_figure,
+    tactile_activity_figure, visual_input_figure,
 )
 
 DIRECTION_MAP = {"上": "up", "下": "down", "左": "left", "右": "right"}
@@ -58,7 +58,8 @@ def run_full_circuit(direction, sharpness, completeness, brightness, noise,
         + "\n\n> Decoder只接收V1、触觉与嗅觉脉冲，不读取上方控件值或正确标签。"
     )
     return (
-        image, decoder_raster_figure(retina_spikes), decoder_v1_raster_figure(v1_spikes),
+        visual_input_figure(image), decoder_raster_figure(retina_spikes),
+        decoder_v1_raster_figure(v1_spikes),
         decoder_activity_figure(v1_spikes), decoder_edge_maps_figure(v1_spikes),
         tactile_activity_figure(touch_spikes), decoder_confidence_figure(prediction), conclusion,
     )
@@ -112,7 +113,7 @@ with gr.Blocks(title="微型多模态感知回路 v0.5") as demo:
 
     gr.Markdown("## ④ 视觉通路：输入 → 视网膜 → V1输出")
     with gr.Row():
-        image = gr.Image(label="V1接收的视觉图形", type="numpy")
+        image = gr.Plot(label="V1接收的16×16视觉图形")
         retina_plot = gr.Plot(label="视网膜泊松脉冲")
     v1_raster = gr.Plot(label="V1输出脉冲（Decoder的真实视觉输入）")
     with gr.Row():
