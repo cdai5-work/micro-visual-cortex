@@ -65,11 +65,14 @@ def heatmap_figure(result: SimulationResult):
 
 
 def decoder_confidence_figure(prediction: DecoderPrediction):
-    labels = ["方向", "尖锐度", "完整性"]
-    values = [prediction.confidence["direction"], prediction.confidence["sharpness"],
-              prediction.confidence["completeness"]]
-    fig, ax = plt.subplots(figsize=(5, 2.8))
-    bars = ax.barh(labels, values, color=["#22d3ee", "#a78bfa", "#34d399"])
+    labels = ["方向", "尖锐度", "完整性", "疼痛", "金属气味", "危险"]
+    values = [prediction.confidence[name] for name in (
+        "direction", "sharpness", "completeness", "pain", "metallic", "danger"
+    )]
+    fig, ax = plt.subplots(figsize=(5, 4))
+    bars = ax.barh(labels, values, color=[
+        "#22d3ee", "#a78bfa", "#34d399", "#fb7185", "#94a3b8", "#f97316"
+    ])
     ax.bar_label(bars, labels=[f"{value:.1%}" for value in values], padding=3)
     ax.set_xlim(0, 1.08)
     ax.set_xlabel("置信度")
@@ -83,6 +86,17 @@ def decoder_raster_figure(spikes: np.ndarray):
     time_index, neuron_index = np.nonzero(spikes)
     ax.scatter(time_index, neuron_index, s=2, color="#67e8f9", alpha=.7)
     ax.set(xlabel="时间 (ms)", ylabel="输入神经元", title="图形转换后的泊松脉冲")
+    ax.set_xlim(0, spikes.shape[0])
+    ax.set_ylim(0, spikes.shape[1])
+    fig.tight_layout()
+    return fig
+
+
+def decoder_v1_raster_figure(spikes: np.ndarray):
+    fig, ax = plt.subplots(figsize=(7, 3))
+    time_index, neuron_index = np.nonzero(spikes)
+    ax.scatter(time_index, neuron_index, s=3, color="#a78bfa", alpha=.75)
+    ax.set(xlabel="时间 (ms)", ylabel="空间化V1神经元", title="V1输出脉冲（Decoder的视觉输入）")
     ax.set_xlim(0, spikes.shape[0])
     ax.set_ylim(0, spikes.shape[1])
     fig.tight_layout()

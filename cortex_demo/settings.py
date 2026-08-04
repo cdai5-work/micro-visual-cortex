@@ -1,7 +1,8 @@
 IMAGE_SIZE = 16
 INPUT_NEURONS = IMAGE_SIZE * IMAGE_SIZE
 ORIENTATIONS = (0, 45, 90, 135)
-NEURONS_PER_GROUP = 32
+# Four-by-four retinotopic positions in each orientation group.
+NEURONS_PER_GROUP = 16
 
 DEFAULT_DURATION_MS = 200
 DEFAULT_DT_MS = 1.0
@@ -24,4 +25,3 @@ STIMULUS_LABELS = {
     "右斜条纹": "diagonal_right",
     "空白": "blank",
 }
-

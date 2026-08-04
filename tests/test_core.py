@@ -4,7 +4,7 @@ import numpy as np
 from cortex_demo import StimulusConfig, simulate
 from cortex_demo.model import MODEL
 from cortex_demo.stimuli import generate_stimulus, poisson_encode
-from cortex_demo.decoder import decode_image, spike_activity_maps, train_default_decoder
+from cortex_demo.decoder import decode_image, decode_multimodal, spike_activity_maps, train_default_decoder
 from cortex_demo.shapes import generate_shape
 
 
@@ -54,7 +54,7 @@ class ModelTests(unittest.TestCase):
     def test_all_showcase_stimuli_finish(self):
         for kind in ("spot", "horizontal", "vertical", "diagonal_left", "diagonal_right"):
             result = simulate(StimulusConfig(kind, noise=0, duration_ms=50, seed=8))
-            self.assertEqual(result.v1_spikes.shape, (50, 128))
+            self.assertEqual(result.v1_spikes.shape, (50, 64))
             self.assertEqual(set(result.group_rates_hz), {0, 45, 90, 135})
 
 
@@ -72,14 +72,19 @@ class DecoderTests(unittest.TestCase):
         decoder = train_default_decoder(samples=1200)
         self.assertGreaterEqual(decoder.metrics["direction"], .95)
         self.assertGreaterEqual(decoder.metrics["sharpness"], .90)
-        self.assertGreaterEqual(decoder.metrics["completeness"], .85)
+        self.assertGreaterEqual(decoder.metrics["completeness"], .90)
+        self.assertGreaterEqual(decoder.metrics["pain"], .85)
+        self.assertGreaterEqual(decoder.metrics["metallic"], .85)
+        self.assertGreaterEqual(decoder.metrics["danger"], .80)
 
     def test_decoder_reads_spikes_and_returns_all_heads(self):
         image = generate_shape("left", "sharp", "complete", noise=0, seed=11)
         prediction, spikes, _ = decode_image(image, seed=11)
-        self.assertEqual(spikes.shape, (300, 256))
+        self.assertEqual(spikes.shape, (200, 64))
         self.assertIn(prediction.direction, ("up", "down", "left", "right"))
-        self.assertEqual(set(prediction.confidence), {"direction", "sharpness", "completeness"})
+        self.assertEqual(set(prediction.confidence), {
+            "direction", "sharpness", "completeness", "pain", "metallic", "danger"
+        })
 
     def test_decoder_activity_maps_preserve_spatial_shape(self):
         image = generate_shape("right", "rounded", "open", noise=0, seed=5)
@@ -89,8 +94,22 @@ class DecoderTests(unittest.TestCase):
             set(maps),
             {"activity", "vertical", "horizontal", "diagonal_left", "diagonal_right"},
         )
-        self.assertTrue(all(value.shape == (16, 16) for value in maps.values()))
+        self.assertTrue(all(value.shape == (4, 4) for value in maps.values()))
         self.assertGreater(float(maps["activity"].max()), 0)
+
+    def test_multimodal_bundle_is_a_true_serial_circuit(self):
+        image = generate_shape("down", "sharp", "complete", noise=0, seed=5)
+        prediction, bundle, retina, voltages, _, metadata = decode_multimodal(
+            image, pain=.9, metallic=.9, seed=12
+        )
+        self.assertEqual(set(bundle.signals), {"vision_v1", "touch", "odor"})
+        self.assertEqual(retina.shape, (200, 256))
+        self.assertEqual(bundle.require("vision_v1").spikes.shape, (200, 64))
+        self.assertEqual(bundle.require("touch").spikes.shape, (200, 16))
+        self.assertEqual(bundle.require("odor").spikes.shape, (200, 16))
+        self.assertEqual(voltages.shape, (200, 64))
+        self.assertIn("backend", metadata)
+        self.assertEqual(prediction.danger, "danger")
 
 
 if __name__ == "__main__":

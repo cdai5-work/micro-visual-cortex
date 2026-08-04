@@ -4,9 +4,6 @@ import time
 import numpy as np
 
 from . import settings
-from .model import _gabor_weights
-
-
 class JaxVisualCortexModel:
     """JIT-compiled single-device LIF kernel for the presentation environment."""
 
@@ -16,7 +13,6 @@ class JaxVisualCortexModel:
 
         self.jax = jax
         self.jnp = jnp
-        self.weights = jnp.asarray(_gabor_weights())
         self.initialization_count = 1
         devices = jax.devices()
         self.backend_name = f"JAX JIT ({devices[0].platform}: {devices[0].device_kind})"
@@ -29,11 +25,26 @@ class JaxVisualCortexModel:
                 jnp.full((total,), settings.V_REST, dtype=jnp.float32),
                 jnp.zeros((total,), dtype=jnp.int16),
                 jnp.zeros((4,), dtype=jnp.float32),
+                jnp.zeros((16, 16), dtype=jnp.float32),
             )
 
             def step(carry, input_spike):
-                v, refractory, prior_rate = carry
-                drive = self.weights @ input_spike * settings.GAIN * 100.0
+                v, refractory, prior_rate, retina_trace = carry
+                retina_trace = retina_trace * .82 + input_spike.reshape(16, 16)
+                gx = jnp.zeros_like(retina_trace).at[:, 1:-1].set(
+                    retina_trace[:, 2:] - retina_trace[:, :-2]
+                )
+                gy = jnp.zeros_like(retina_trace).at[1:-1, :].set(
+                    retina_trace[2:, :] - retina_trace[:-2, :]
+                )
+                oriented = jnp.stack([
+                    jnp.abs(gy),
+                    jnp.sqrt(jnp.maximum(-gx * gy, 0)) * 3,
+                    jnp.abs(gx),
+                    jnp.sqrt(jnp.maximum(gx * gy, 0)) * 3,
+                ])
+                pooled = oriented.reshape(4, 4, 4, 4, 4).mean(axis=(2, 4)).reshape(total)
+                drive = pooled * settings.GAIN * 100.0
                 inhibition = jnp.repeat(prior_rate.sum() - prior_rate, group_size)
                 inhibition = inhibition * settings.LATERAL_INHIBITION
                 active = refractory <= 0
@@ -45,7 +56,7 @@ class JaxVisualCortexModel:
                 refractory = jnp.where(active, 0, refractory - 1)
                 refractory = jnp.where(fired, settings.REFRACTORY_MS, refractory)
                 rate = spike.reshape(4, group_size).mean(axis=1)
-                return (v, refractory, rate), (spike, v)
+                return (v, refractory, rate, retina_trace), (spike, v)
 
             _, outputs = jax.lax.scan(step, initial, input_spikes)
             return outputs
@@ -61,4 +72,3 @@ class JaxVisualCortexModel:
         spikes.block_until_ready()
         elapsed = (time.perf_counter() - started) * 1000
         return np.asarray(spikes), np.asarray(voltage), elapsed
-

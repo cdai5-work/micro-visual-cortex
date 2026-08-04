@@ -3,53 +3,46 @@ from __future__ import annotations
 from dataclasses import dataclass
 import numpy as np
 
-from .shapes import COMPLETENESS, DIRECTIONS, SHARPNESS, ShapeLabels, generate_dataset
-from .stimuli import poisson_encode
+from .multimodal import MultimodalSignalBundle, encode_multimodal
+from .shapes import COMPLETENESS, DIRECTIONS, SHARPNESS, generate_dataset
 
 HEAD_CLASSES = {
     "direction": DIRECTIONS,
     "sharpness": SHARPNESS,
     "completeness": COMPLETENESS,
+    "pain": ("no_pain", "pain"),
+    "metallic": ("not_metallic", "metallic"),
+    "danger": ("safer", "danger"),
 }
 
 
-def _pool4(array: np.ndarray) -> np.ndarray:
-    return array.reshape(4, 4, 4, 4).mean(axis=(1, 3))
+def _temporal_features(spikes: np.ndarray) -> np.ndarray:
+    parts = np.array_split(spikes, 3, axis=0)
+    return np.concatenate([spikes.mean(axis=0)] + [part.mean(axis=0) for part in parts])
+
+
+def bundle_features(bundle: MultimodalSignalBundle) -> np.ndarray:
+    """Fuse actual V1, touch and odor spike signals through a stable modality interface."""
+    visual = bundle.require("vision_v1").spikes
+    if visual.shape[1] != 64:
+        raise ValueError("空间化V1必须输出64个神经元通道")
+    touch = bundle.require("touch").spikes.mean(axis=0)
+    odor = bundle.require("odor").spikes.mean(axis=0)
+    return np.concatenate([_temporal_features(visual), touch, odor]).astype(np.float32)
 
 
 def spike_activity_maps(spikes: np.ndarray) -> dict[str, np.ndarray]:
-    """Reconstruct spatial activity and four edge-energy maps from spike trains."""
-    if spikes.ndim != 2 or spikes.shape[1] != 256:
-        raise ValueError("脉冲矩阵必须具有形状 (时间步, 256)")
-    rate_map = spikes.mean(axis=0).reshape(16, 16)
-    gx = np.zeros_like(rate_map)
-    gy = np.zeros_like(rate_map)
-    gx[:, 1:-1] = rate_map[:, 2:] - rate_map[:, :-2]
-    gy[1:-1, :] = rate_map[2:, :] - rate_map[:-2, :]
-    diag_a = (gx + gy) / np.sqrt(2)
-    diag_b = (gx - gy) / np.sqrt(2)
+    """Expose the four retinotopic orientation maps encoded by V1 spikes."""
+    if spikes.ndim != 2 or spikes.shape[1] != 64:
+        raise ValueError("V1脉冲矩阵必须具有形状 (时间步, 64)")
+    grouped = spikes.mean(axis=0).reshape(4, 4, 4)
     return {
-        "activity": rate_map,
-        "vertical": np.abs(gx),
-        "horizontal": np.abs(gy),
-        "diagonal_left": np.abs(diag_a),
-        "diagonal_right": np.abs(diag_b),
+        "horizontal": grouped[0],
+        "diagonal_left": grouped[1],
+        "vertical": grouped[2],
+        "diagonal_right": grouped[3],
+        "activity": grouped.mean(axis=0),
     }
-
-
-def spike_features(spikes: np.ndarray) -> np.ndarray:
-    """Extract pooled spatial and orientation energy from retina spike trains only."""
-    maps = spike_activity_maps(spikes)
-    channels = [maps[name] for name in (
-        "activity", "vertical", "horizontal", "diagonal_left", "diagonal_right"
-    )]
-    return np.concatenate([_pool4(c).reshape(-1) for c in channels]).astype(np.float32)
-
-
-def image_features(image: np.ndarray, seed: int) -> np.ndarray:
-    spikes = poisson_encode(image, duration_ms=300, dt_ms=1,
-                            max_rate_hz=180, seed=seed)
-    return spike_features(spikes)
 
 
 def _softmax(logits: np.ndarray) -> np.ndarray:
@@ -58,23 +51,36 @@ def _softmax(logits: np.ndarray) -> np.ndarray:
     return exp / exp.sum(axis=1, keepdims=True)
 
 
+@dataclass(frozen=True)
+class SemanticLabels:
+    direction: str
+    sharpness: str
+    completeness: str
+    pain: str
+    metallic: str
+    danger: str
+
+
 @dataclass
 class DecoderPrediction:
     direction: str
     sharpness: str
     completeness: str
+    pain: str
+    metallic: str
+    danger: str
     confidence: dict[str, float]
 
 
 class MultiTaskDecoder:
-    """Small trainable MLP with three semantic output heads."""
+    """Trainable fusion MLP accepting any modalities exposed through the signal bundle."""
 
-    def __init__(self, input_size: int = 80, hidden_size: int = 36, seed: int = 9):
+    def __init__(self, input_size: int = 288, hidden_size: int = 64, seed: int = 9):
         rng = np.random.default_rng(seed)
         self.w1 = rng.normal(0, np.sqrt(2 / input_size), (input_size, hidden_size)).astype(np.float32)
         self.b1 = np.zeros(hidden_size, dtype=np.float32)
         self.heads = {
-            name: [rng.normal(0, .12, (hidden_size, len(classes))).astype(np.float32),
+            name: [rng.normal(0, .1, (hidden_size, len(classes))).astype(np.float32),
                    np.zeros(len(classes), dtype=np.float32)]
             for name, classes in HEAD_CLASSES.items()
         }
@@ -83,18 +89,17 @@ class MultiTaskDecoder:
         self.trained = False
         self.metrics = {}
 
-    def _indices(self, labels: list[ShapeLabels], name: str) -> np.ndarray:
+    def _indices(self, labels: list[SemanticLabels], name: str) -> np.ndarray:
         classes = HEAD_CLASSES[name]
         return np.asarray([classes.index(getattr(label, name)) for label in labels])
 
-    def fit(self, features: np.ndarray, labels: list[ShapeLabels], epochs: int = 220,
-            learning_rate: float = .035) -> None:
+    def fit(self, features: np.ndarray, labels: list[SemanticLabels], epochs: int = 380,
+            learning_rate: float = .025) -> None:
         self.mean = features.mean(axis=0)
         self.std = features.std(axis=0) + 1e-5
         x = (features - self.mean) / self.std
         n = len(x)
         targets = {name: self._indices(labels, name) for name in HEAD_CLASSES}
-
         for _ in range(epochs):
             hidden_pre = x @ self.w1 + self.b1
             hidden = np.maximum(hidden_pre, 0)
@@ -124,10 +129,29 @@ class MultiTaskDecoder:
         return DecoderPrediction(**chosen, confidence=confidence)
 
 
-def train_default_decoder(samples: int = 1600) -> MultiTaskDecoder:
-    images, labels = generate_dataset(samples=samples)
+def _danger_label(direction: str, sharpness: str, pain: float, metallic: float) -> str:
+    painful = pain >= .5
+    risky_object_cue = metallic >= .5 and sharpness == "sharp" and direction == "down"
+    return "danger" if painful or risky_object_cue else "safer"
+
+
+def train_default_decoder(samples: int = 800) -> MultiTaskDecoder:
+    images, shape_labels = generate_dataset(samples=samples, seed=2027)
+    rng = np.random.default_rng(2028)
+    features, labels = [], []
+    for i, (image, shape_label) in enumerate(zip(images, shape_labels)):
+        pain = float(rng.uniform(0, 1))
+        metallic = float(rng.uniform(0, 1))
+        bundle, _, _, _ = encode_multimodal(image, pain, metallic, 20000 + i, duration_ms=120)
+        features.append(bundle_features(bundle))
+        labels.append(SemanticLabels(
+            shape_label.direction, shape_label.sharpness, shape_label.completeness,
+            "pain" if pain >= .5 else "no_pain",
+            "metallic" if metallic >= .5 else "not_metallic",
+            _danger_label(shape_label.direction, shape_label.sharpness, pain, metallic),
+        ))
+    features = np.stack(features)
     split = int(samples * .8)
-    features = np.stack([image_features(image, 10000 + i) for i, image in enumerate(images)])
     decoder = MultiTaskDecoder()
     decoder.fit(features[:split], labels[:split])
     probabilities = decoder.probabilities(features[split:])
@@ -148,7 +172,15 @@ def get_decoder() -> MultiTaskDecoder:
     return DECODER
 
 
-def decode_image(image: np.ndarray, seed: int = 42):
-    spikes = poisson_encode(image, 300, 1, 180, seed)
+def decode_multimodal(image: np.ndarray, pain: float, metallic: float, seed: int = 42):
+    bundle, retina_spikes, voltages, metadata = encode_multimodal(
+        image, pain, metallic, seed, duration_ms=200
+    )
     decoder = get_decoder()
-    return decoder.predict(spike_features(spikes)), spikes, decoder.metrics
+    prediction = decoder.predict(bundle_features(bundle))
+    return prediction, bundle, retina_spikes, voltages, decoder.metrics, metadata
+
+
+def decode_image(image: np.ndarray, seed: int = 42):
+    prediction, bundle, retina, _, metrics, _ = decode_multimodal(image, 0, 0, seed)
+    return prediction, bundle.require("vision_v1").spikes, metrics
