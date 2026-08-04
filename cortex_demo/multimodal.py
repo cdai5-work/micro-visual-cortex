@@ -38,16 +38,25 @@ def scalar_poisson_signal(name: str, values, duration_ms: int, seed: int,
     return ModalitySignal(name, spikes.astype(np.float32))
 
 
+def encode_touch(area: float, force: float, pain: float, hardness: float,
+                 duration_ms: int, seed: int) -> ModalitySignal:
+    """Encode four tactile receptor populations, each with ON/OFF channels."""
+    values = []
+    for value in (area, force, pain, hardness):
+        value = float(np.clip(value, 0, 1))
+        values.extend([value] * 8 + [1 - value] * 8)
+    return scalar_poisson_signal("touch", values, duration_ms, seed)
+
+
 def encode_multimodal(image: np.ndarray, pain: float, metallic: float, seed: int,
-                      duration_ms: int = 200):
+                      duration_ms: int = 200, area: float = .5,
+                      force: float = .5, hardness: float = .5):
     retina_spikes = poisson_encode(image, duration_ms, 1, 180, seed)
     model, fallback = get_model()
     v1_spikes, voltages, elapsed = model.run(retina_spikes, 1.0)
     bundle = MultimodalSignalBundle()
     bundle.add(ModalitySignal("vision_v1", v1_spikes))
-    bundle.add(scalar_poisson_signal(
-        "touch", [pain] * 8 + [1 - pain] * 8, duration_ms, seed + 1
-    ))
+    bundle.add(encode_touch(area, force, pain, hardness, duration_ms, seed + 1))
     bundle.add(scalar_poisson_signal(
         "odor", [metallic] * 8 + [1 - metallic] * 8, duration_ms, seed + 2
     ))

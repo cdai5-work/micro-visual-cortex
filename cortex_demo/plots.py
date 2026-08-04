@@ -65,18 +65,33 @@ def heatmap_figure(result: SimulationResult):
 
 
 def decoder_confidence_figure(prediction: DecoderPrediction):
-    labels = ["方向", "尖锐度", "完整性", "疼痛", "金属气味", "危险"]
+    labels = ["方向", "尖锐度", "完整性", "面积", "力度", "疼痛", "坚硬", "金属气味", "危险"]
     values = [prediction.confidence[name] for name in (
-        "direction", "sharpness", "completeness", "pain", "metallic", "danger"
+        "direction", "sharpness", "completeness", "area", "force", "pain",
+        "hardness", "metallic", "danger"
     )]
-    fig, ax = plt.subplots(figsize=(5, 4))
-    bars = ax.barh(labels, values, color=[
-        "#22d3ee", "#a78bfa", "#34d399", "#fb7185", "#94a3b8", "#f97316"
-    ])
+    fig, ax = plt.subplots(figsize=(5, 5))
+    bars = ax.barh(labels, values, color=plt.cm.viridis(np.linspace(.15, .9, len(labels))))
     ax.bar_label(bars, labels=[f"{value:.1%}" for value in values], padding=3)
     ax.set_xlim(0, 1.08)
     ax.set_xlabel("置信度")
     ax.set_title("可训练Decoder输出")
+    fig.tight_layout()
+    return fig
+
+
+def tactile_activity_figure(spikes: np.ndarray):
+    if spikes.shape[1] != 64:
+        raise ValueError("触觉脉冲必须包含64个通道")
+    population = spikes.mean(axis=0).reshape(4, 16)
+    strengths = population[:, :8].mean(axis=1) * 2  # 500 Hz maximum → normalized 0–1
+    labels = ["接触面积", "力度", "疼痛", "坚硬程度"]
+    fig, ax = plt.subplots(figsize=(6, 3))
+    bars = ax.bar(labels, strengths, color=["#38bdf8", "#f59e0b", "#fb7185", "#94a3b8"])
+    ax.bar_label(bars, labels=[f"{v:.2f}" for v in strengths], padding=3)
+    ax.set_ylim(0, 1.1)
+    ax.set_ylabel("触觉受体群活动（归一化）")
+    ax.set_title("独立触觉模块输出（送入Decoder）")
     fig.tight_layout()
     return fig
 

@@ -10,7 +10,10 @@ HEAD_CLASSES = {
     "direction": DIRECTIONS,
     "sharpness": SHARPNESS,
     "completeness": COMPLETENESS,
+    "area": ("small", "large"),
+    "force": ("gentle", "strong"),
     "pain": ("no_pain", "pain"),
+    "hardness": ("soft", "hard"),
     "metallic": ("not_metallic", "metallic"),
     "danger": ("safer", "danger"),
 }
@@ -27,6 +30,8 @@ def bundle_features(bundle: MultimodalSignalBundle) -> np.ndarray:
     if visual.shape[1] != 64:
         raise ValueError("空间化V1必须输出64个神经元通道")
     touch = bundle.require("touch").spikes.mean(axis=0)
+    if touch.shape[0] != 64:
+        raise ValueError("触觉模块必须输出64个通道（四类变量各16通道）")
     odor = bundle.require("odor").spikes.mean(axis=0)
     return np.concatenate([_temporal_features(visual), touch, odor]).astype(np.float32)
 
@@ -56,7 +61,10 @@ class SemanticLabels:
     direction: str
     sharpness: str
     completeness: str
+    area: str
+    force: str
     pain: str
+    hardness: str
     metallic: str
     danger: str
 
@@ -66,7 +74,10 @@ class DecoderPrediction:
     direction: str
     sharpness: str
     completeness: str
+    area: str
+    force: str
     pain: str
+    hardness: str
     metallic: str
     danger: str
     confidence: dict[str, float]
@@ -75,7 +86,7 @@ class DecoderPrediction:
 class MultiTaskDecoder:
     """Trainable fusion MLP accepting any modalities exposed through the signal bundle."""
 
-    def __init__(self, input_size: int = 288, hidden_size: int = 64, seed: int = 9):
+    def __init__(self, input_size: int = 336, hidden_size: int = 80, seed: int = 9):
         rng = np.random.default_rng(seed)
         self.w1 = rng.normal(0, np.sqrt(2 / input_size), (input_size, hidden_size)).astype(np.float32)
         self.b1 = np.zeros(hidden_size, dtype=np.float32)
@@ -129,10 +140,14 @@ class MultiTaskDecoder:
         return DecoderPrediction(**chosen, confidence=confidence)
 
 
-def _danger_label(direction: str, sharpness: str, pain: float, metallic: float) -> str:
+def _danger_label(direction: str, sharpness: str, force: float, pain: float,
+                  hardness: float, metallic: float) -> str:
     painful = pain >= .5
-    risky_object_cue = metallic >= .5 and sharpness == "sharp" and direction == "down"
-    return "danger" if painful or risky_object_cue else "safer"
+    impact_risk = force >= .65 and hardness >= .6
+    risky_object_cue = sharpness == "sharp" and direction == "down" and (
+        metallic >= .5 or hardness >= .6
+    )
+    return "danger" if painful or impact_risk or risky_object_cue else "safer"
 
 
 def train_default_decoder(samples: int = 800) -> MultiTaskDecoder:
@@ -141,14 +156,24 @@ def train_default_decoder(samples: int = 800) -> MultiTaskDecoder:
     features, labels = [], []
     for i, (image, shape_label) in enumerate(zip(images, shape_labels)):
         pain = float(rng.uniform(0, 1))
+        area = float(rng.uniform(0, 1))
+        force = float(rng.uniform(0, 1))
+        hardness = float(rng.uniform(0, 1))
         metallic = float(rng.uniform(0, 1))
-        bundle, _, _, _ = encode_multimodal(image, pain, metallic, 20000 + i, duration_ms=120)
+        bundle, _, _, _ = encode_multimodal(
+            image, pain, metallic, 20000 + i, duration_ms=120,
+            area=area, force=force, hardness=hardness,
+        )
         features.append(bundle_features(bundle))
         labels.append(SemanticLabels(
             shape_label.direction, shape_label.sharpness, shape_label.completeness,
+            "large" if area >= .5 else "small",
+            "strong" if force >= .5 else "gentle",
             "pain" if pain >= .5 else "no_pain",
+            "hard" if hardness >= .5 else "soft",
             "metallic" if metallic >= .5 else "not_metallic",
-            _danger_label(shape_label.direction, shape_label.sharpness, pain, metallic),
+            _danger_label(shape_label.direction, shape_label.sharpness, force, pain,
+                          hardness, metallic),
         ))
     features = np.stack(features)
     split = int(samples * .8)
@@ -172,9 +197,11 @@ def get_decoder() -> MultiTaskDecoder:
     return DECODER
 
 
-def decode_multimodal(image: np.ndarray, pain: float, metallic: float, seed: int = 42):
+def decode_multimodal(image: np.ndarray, pain: float, metallic: float, seed: int = 42,
+                      area: float = .5, force: float = .5, hardness: float = .5):
     bundle, retina_spikes, voltages, metadata = encode_multimodal(
-        image, pain, metallic, seed, duration_ms=200
+        image, pain, metallic, seed, duration_ms=200,
+        area=area, force=force, hardness=hardness,
     )
     decoder = get_decoder()
     prediction = decoder.predict(bundle_features(bundle))

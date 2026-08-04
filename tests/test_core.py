@@ -73,7 +73,10 @@ class DecoderTests(unittest.TestCase):
         self.assertGreaterEqual(decoder.metrics["direction"], .95)
         self.assertGreaterEqual(decoder.metrics["sharpness"], .90)
         self.assertGreaterEqual(decoder.metrics["completeness"], .90)
+        self.assertGreaterEqual(decoder.metrics["area"], .85)
+        self.assertGreaterEqual(decoder.metrics["force"], .85)
         self.assertGreaterEqual(decoder.metrics["pain"], .85)
+        self.assertGreaterEqual(decoder.metrics["hardness"], .85)
         self.assertGreaterEqual(decoder.metrics["metallic"], .85)
         self.assertGreaterEqual(decoder.metrics["danger"], .80)
 
@@ -83,7 +86,8 @@ class DecoderTests(unittest.TestCase):
         self.assertEqual(spikes.shape, (200, 64))
         self.assertIn(prediction.direction, ("up", "down", "left", "right"))
         self.assertEqual(set(prediction.confidence), {
-            "direction", "sharpness", "completeness", "pain", "metallic", "danger"
+            "direction", "sharpness", "completeness", "area", "force", "pain",
+            "hardness", "metallic", "danger"
         })
 
     def test_decoder_activity_maps_preserve_spatial_shape(self):
@@ -100,12 +104,12 @@ class DecoderTests(unittest.TestCase):
     def test_multimodal_bundle_is_a_true_serial_circuit(self):
         image = generate_shape("down", "sharp", "complete", noise=0, seed=5)
         prediction, bundle, retina, voltages, _, metadata = decode_multimodal(
-            image, pain=.9, metallic=.9, seed=12
+            image, pain=.9, metallic=.9, seed=12, area=.2, force=.9, hardness=.9
         )
         self.assertEqual(set(bundle.signals), {"vision_v1", "touch", "odor"})
         self.assertEqual(retina.shape, (200, 256))
         self.assertEqual(bundle.require("vision_v1").spikes.shape, (200, 64))
-        self.assertEqual(bundle.require("touch").spikes.shape, (200, 16))
+        self.assertEqual(bundle.require("touch").spikes.shape, (200, 64))
         self.assertEqual(bundle.require("odor").spikes.shape, (200, 16))
         self.assertEqual(voltages.shape, (200, 64))
         self.assertIn("backend", metadata)
