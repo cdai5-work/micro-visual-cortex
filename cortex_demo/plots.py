@@ -3,9 +3,12 @@ from __future__ import annotations
 import matplotlib.pyplot as plt
 import numpy as np
 
+plt.rcParams["font.sans-serif"] = ["Microsoft YaHei", "SimHei", "DejaVu Sans"]
+plt.rcParams["axes.unicode_minus"] = False
+
 from .api import SimulationResult
 from .settings import NEURONS_PER_GROUP, ORIENTATIONS
-from .decoder import DecoderPrediction
+from .decoder import DecoderPrediction, spike_activity_maps
 
 
 def stimulus_figure(result: SimulationResult):
@@ -74,3 +77,44 @@ def decoder_confidence_figure(prediction: DecoderPrediction):
     fig.tight_layout()
     return fig
 
+
+def decoder_raster_figure(spikes: np.ndarray):
+    fig, ax = plt.subplots(figsize=(7, 3))
+    time_index, neuron_index = np.nonzero(spikes)
+    ax.scatter(time_index, neuron_index, s=2, color="#67e8f9", alpha=.7)
+    ax.set(xlabel="时间 (ms)", ylabel="输入神经元", title="图形转换后的泊松脉冲")
+    ax.set_xlim(0, spikes.shape[0])
+    ax.set_ylim(0, spikes.shape[1])
+    fig.tight_layout()
+    return fig
+
+
+def decoder_activity_figure(spikes: np.ndarray):
+    activity = spike_activity_maps(spikes)["activity"]
+    fig, ax = plt.subplots(figsize=(4, 4))
+    im = ax.imshow(activity, cmap="magma", interpolation="nearest", vmin=0)
+    ax.set_title("由脉冲重建的16×16空间活动")
+    ax.set_xlabel("视网膜位置 X")
+    ax.set_ylabel("视网膜位置 Y")
+    fig.colorbar(im, ax=ax, label="每时间步发放概率")
+    fig.tight_layout()
+    return fig
+
+
+def decoder_edge_maps_figure(spikes: np.ndarray):
+    maps = spike_activity_maps(spikes)
+    panels = [
+        ("vertical", "垂直边缘响应"),
+        ("horizontal", "水平边缘响应"),
+        ("diagonal_left", "左斜边缘响应"),
+        ("diagonal_right", "右斜边缘响应"),
+    ]
+    maximum = max(float(maps[key].max()) for key, _ in panels) or 1.0
+    fig, axes = plt.subplots(2, 2, figsize=(6, 5))
+    for ax, (key, title) in zip(axes.flat, panels):
+        ax.imshow(maps[key], cmap="viridis", interpolation="nearest", vmin=0, vmax=maximum)
+        ax.set_title(title, fontsize=10)
+        ax.axis("off")
+    fig.suptitle("Decoder读取的方向边缘活动")
+    fig.tight_layout()
+    return fig

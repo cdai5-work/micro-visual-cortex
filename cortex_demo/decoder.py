@@ -17,8 +17,10 @@ def _pool4(array: np.ndarray) -> np.ndarray:
     return array.reshape(4, 4, 4, 4).mean(axis=(1, 3))
 
 
-def spike_features(spikes: np.ndarray) -> np.ndarray:
-    """Extract spatial and orientation energy from retina spike trains only."""
+def spike_activity_maps(spikes: np.ndarray) -> dict[str, np.ndarray]:
+    """Reconstruct spatial activity and four edge-energy maps from spike trains."""
+    if spikes.ndim != 2 or spikes.shape[1] != 256:
+        raise ValueError("脉冲矩阵必须具有形状 (时间步, 256)")
     rate_map = spikes.mean(axis=0).reshape(16, 16)
     gx = np.zeros_like(rate_map)
     gy = np.zeros_like(rate_map)
@@ -26,7 +28,21 @@ def spike_features(spikes: np.ndarray) -> np.ndarray:
     gy[1:-1, :] = rate_map[2:, :] - rate_map[:-2, :]
     diag_a = (gx + gy) / np.sqrt(2)
     diag_b = (gx - gy) / np.sqrt(2)
-    channels = [rate_map, np.abs(gx), np.abs(gy), np.abs(diag_a), np.abs(diag_b)]
+    return {
+        "activity": rate_map,
+        "vertical": np.abs(gx),
+        "horizontal": np.abs(gy),
+        "diagonal_left": np.abs(diag_a),
+        "diagonal_right": np.abs(diag_b),
+    }
+
+
+def spike_features(spikes: np.ndarray) -> np.ndarray:
+    """Extract pooled spatial and orientation energy from retina spike trains only."""
+    maps = spike_activity_maps(spikes)
+    channels = [maps[name] for name in (
+        "activity", "vertical", "horizontal", "diagonal_left", "diagonal_right"
+    )]
     return np.concatenate([_pool4(c).reshape(-1) for c in channels]).astype(np.float32)
 
 
@@ -136,4 +152,3 @@ def decode_image(image: np.ndarray, seed: int = 42):
     spikes = poisson_encode(image, 300, 1, 180, seed)
     decoder = get_decoder()
     return decoder.predict(spike_features(spikes)), spikes, decoder.metrics
-

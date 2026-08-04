@@ -4,7 +4,8 @@ import gradio as gr
 
 from cortex_demo import StimulusConfig, decode_image, generate_shape, simulate
 from cortex_demo.plots import (
-    decoder_confidence_figure, heatmap_figure, raster_figure, rates_figure,
+    decoder_activity_figure, decoder_confidence_figure, decoder_edge_maps_figure,
+    decoder_raster_figure, heatmap_figure, raster_figure, rates_figure,
     stimulus_figure, voltage_figure,
 )
 from cortex_demo.settings import STIMULUS_LABELS
@@ -56,7 +57,14 @@ def run_decoder_demo(direction, sharpness, completeness, brightness, noise, seed
         f"方向 {metrics['direction']:.1%} · 边缘 {metrics['sharpness']:.1%} · "
         f"轮廓 {metrics['completeness']:.1%}"
     )
-    return image, decoder_confidence_figure(prediction), conclusion
+    return (
+        image,
+        decoder_raster_figure(spikes),
+        decoder_activity_figure(spikes),
+        decoder_edge_maps_figure(spikes),
+        decoder_confidence_figure(prediction),
+        conclusion,
+    )
 
 
 with gr.Blocks(title="微型视觉皮层 v0.2") as demo:
@@ -111,16 +119,23 @@ with gr.Blocks(title="微型视觉皮层 v0.2") as demo:
                     decoded_image = gr.Image(label="Decoder实际接收的图形", type="numpy")
                     decoder_conclusion = gr.Markdown()
                     decoder_confidence = gr.Plot(label="预测置信度")
+            gr.Markdown("## 从图形到含义的中间信号")
+            decoder_raster = gr.Plot(label="泊松脉冲栅格图")
+            with gr.Row():
+                decoder_activity = gr.Plot(label="空间神经活动")
+                decoder_edges = gr.Plot(label="方向边缘活动")
 
             decoder_inputs = [
                 decoder_direction, decoder_sharpness, decoder_completeness,
                 decoder_brightness, decoder_noise, decoder_seed,
             ]
-            decoder_outputs = [decoded_image, decoder_confidence, decoder_conclusion]
+            decoder_outputs = [
+                decoded_image, decoder_raster, decoder_activity,
+                decoder_edges, decoder_confidence, decoder_conclusion,
+            ]
             decode_button.click(run_decoder_demo, decoder_inputs, decoder_outputs)
             demo.load(run_decoder_demo, decoder_inputs, decoder_outputs)
 
 
 if __name__ == "__main__":
     demo.queue(default_concurrency_limit=2).launch(theme=gr.themes.Soft())
-

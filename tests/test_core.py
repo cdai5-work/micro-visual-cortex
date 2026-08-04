@@ -4,7 +4,7 @@ import numpy as np
 from cortex_demo import StimulusConfig, simulate
 from cortex_demo.model import MODEL
 from cortex_demo.stimuli import generate_stimulus, poisson_encode
-from cortex_demo.decoder import decode_image, train_default_decoder
+from cortex_demo.decoder import decode_image, spike_activity_maps, train_default_decoder
 from cortex_demo.shapes import generate_shape
 
 
@@ -80,6 +80,17 @@ class DecoderTests(unittest.TestCase):
         self.assertEqual(spikes.shape, (300, 256))
         self.assertIn(prediction.direction, ("up", "down", "left", "right"))
         self.assertEqual(set(prediction.confidence), {"direction", "sharpness", "completeness"})
+
+    def test_decoder_activity_maps_preserve_spatial_shape(self):
+        image = generate_shape("right", "rounded", "open", noise=0, seed=5)
+        _, spikes, _ = decode_image(image, seed=9)
+        maps = spike_activity_maps(spikes)
+        self.assertEqual(
+            set(maps),
+            {"activity", "vertical", "horizontal", "diagonal_left", "diagonal_right"},
+        )
+        self.assertTrue(all(value.shape == (16, 16) for value in maps.values()))
+        self.assertGreater(float(maps["activity"].max()), 0)
 
 
 if __name__ == "__main__":
