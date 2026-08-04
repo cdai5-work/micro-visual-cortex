@@ -96,6 +96,26 @@ def tactile_activity_figure(spikes: np.ndarray):
     return fig
 
 
+def causal_validation_figure(report: dict):
+    heads = ["direction", "sharpness", "completeness"]
+    labels = ["方向", "尖锐度", "完整性"]
+    conditions = ["正常V1", "切断V1", "打乱V1通道"]
+    x = np.arange(len(heads))
+    width = .24
+    fig, ax = plt.subplots(figsize=(7, 4))
+    for offset, condition, color in zip((-width, 0, width), conditions,
+                                         ("#22c55e", "#ef4444", "#f59e0b")):
+        values = [report["accuracies"][condition][head] for head in heads]
+        ax.bar(x + offset, values, width, label=condition, color=color)
+    ax.set_xticks(x, labels)
+    ax.set_ylim(0, 1.05)
+    ax.set_ylabel("未见样本准确率")
+    ax.set_title("V1因果消融：破坏视觉信号后性能是否下降")
+    ax.legend()
+    fig.tight_layout()
+    return fig
+
+
 def decoder_raster_figure(spikes: np.ndarray):
     fig, ax = plt.subplots(figsize=(7, 3))
     time_index, neuron_index = np.nonzero(spikes)

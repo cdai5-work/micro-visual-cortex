@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import numpy as np
 
-from .multimodal import MultimodalSignalBundle, encode_multimodal
+from .multimodal import ModalitySignal, MultimodalSignalBundle, encode_multimodal
 from .shapes import COMPLETENESS, DIRECTIONS, SHARPNESS, generate_dataset
 
 HEAD_CLASSES = {
@@ -188,6 +188,7 @@ def train_default_decoder(samples: int = 800) -> MultiTaskDecoder:
 
 
 DECODER = None
+CAUSAL_REPORT = None
 
 
 def get_decoder() -> MultiTaskDecoder:
@@ -211,3 +212,63 @@ def decode_multimodal(image: np.ndarray, pain: float, metallic: float, seed: int
 def decode_image(image: np.ndarray, seed: int = 42):
     prediction, bundle, retina, _, metrics, _ = decode_multimodal(image, 0, 0, seed)
     return prediction, bundle.require("vision_v1").spikes, metrics
+
+
+def validate_decoder_causality(samples: int = 160) -> dict:
+    """Measure whether visual heads actually depend on V1 rather than hidden labels."""
+    global CAUSAL_REPORT
+    if CAUSAL_REPORT is not None:
+        return CAUSAL_REPORT
+    images, labels = generate_dataset(samples=samples, seed=9102)
+    decoder = get_decoder()
+    rng = np.random.default_rng(9103)
+    normal, silenced, shuffled = [], [], []
+    for index, image in enumerate(images):
+        bundle, _, _, _ = encode_multimodal(
+            image, pain=.5, metallic=.5, seed=30000 + index, duration_ms=120,
+            area=.5, force=.5, hardness=.5,
+        )
+        normal.append(bundle_features(bundle))
+        v1 = bundle.require("vision_v1").spikes
+        bundle.signals["vision_v1"] = ModalitySignal("vision_v1", np.zeros_like(v1))
+        silenced.append(bundle_features(bundle))
+        permutation = rng.permutation(v1.shape[1])
+        bundle.signals["vision_v1"] = ModalitySignal("vision_v1", v1[:, permutation])
+        shuffled.append(bundle_features(bundle))
+
+    targets = {
+        "direction": np.asarray([DIRECTIONS.index(x.direction) for x in labels]),
+        "sharpness": np.asarray([SHARPNESS.index(x.sharpness) for x in labels]),
+        "completeness": np.asarray([COMPLETENESS.index(x.completeness) for x in labels]),
+    }
+    conditions = {
+        "正常V1": np.stack(normal),
+        "切断V1": np.stack(silenced),
+        "打乱V1通道": np.stack(shuffled),
+    }
+    accuracies = {}
+    for condition, features in conditions.items():
+        probabilities = decoder.probabilities(features)
+        accuracies[condition] = {
+            head: float((probabilities[head].argmax(axis=1) == target).mean())
+            for head, target in targets.items()
+        }
+
+    probe = images[0]
+    first = encode_multimodal(probe, .4, .6, 4567, duration_ms=120,
+                              area=.3, force=.7, hardness=.8)[0]
+    second = encode_multimodal(probe, .4, .6, 4567, duration_ms=120,
+                               area=.3, force=.7, hardness=.8)[0]
+    reproducible = all(np.array_equal(first.require(name).spikes, second.require(name).spikes)
+                       for name in ("vision_v1", "touch", "odor"))
+    normal_mean = float(np.mean(list(accuracies["正常V1"].values())))
+    silenced_mean = float(np.mean(list(accuracies["切断V1"].values())))
+    CAUSAL_REPORT = {
+        "accuracies": accuracies,
+        "reproducible": reproducible,
+        "normal_mean": normal_mean,
+        "silenced_mean": silenced_mean,
+        "causal_gap": normal_mean - silenced_mean,
+        "samples": samples,
+    }
+    return CAUSAL_REPORT

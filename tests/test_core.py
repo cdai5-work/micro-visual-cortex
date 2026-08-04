@@ -4,7 +4,8 @@ import numpy as np
 from cortex_demo import StimulusConfig, simulate
 from cortex_demo.model import MODEL
 from cortex_demo.stimuli import generate_stimulus, poisson_encode
-from cortex_demo.decoder import decode_image, decode_multimodal, spike_activity_maps, train_default_decoder
+from cortex_demo.decoder import (decode_image, decode_multimodal, spike_activity_maps,
+                                 train_default_decoder, validate_decoder_causality)
 from cortex_demo.shapes import generate_shape
 
 
@@ -114,6 +115,12 @@ class DecoderTests(unittest.TestCase):
         self.assertEqual(voltages.shape, (200, 64))
         self.assertIn("backend", metadata)
         self.assertEqual(prediction.danger, "danger")
+
+    def test_causal_ablation_proves_visual_heads_use_v1(self):
+        report = validate_decoder_causality(samples=120)
+        self.assertTrue(report["reproducible"])
+        self.assertGreaterEqual(report["normal_mean"], .90)
+        self.assertGreaterEqual(report["causal_gap"], .30)
 
 
 if __name__ == "__main__":
