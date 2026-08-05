@@ -6,7 +6,7 @@ from cortex_demo import decode_multimodal, generate_shape, validate_decoder_caus
 from cortex_demo.plots import (
     causal_validation_figure, decoder_activity_figure, decoder_confidence_figure,
     decoder_edge_maps_figure, decoder_raster_figure, decoder_v1_raster_figure,
-    tactile_activity_figure, visual_input_figure,
+    modality_weights_figure, tactile_activity_figure, visual_input_figure,
 )
 
 DIRECTION_MAP = {"上": "up", "下": "down", "左": "left", "右": "right"}
@@ -15,6 +15,17 @@ COMPLETENESS_MAP = {"完整": "complete", "有缺口": "open"}
 ZH_DIRECTION = {v: k for k, v in DIRECTION_MAP.items()}
 ZH_SHARPNESS = {v: k for k, v in SHARPNESS_MAP.items()}
 ZH_COMPLETENESS = {v: k for k, v in COMPLETENESS_MAP.items()}
+
+SCENE_PRESETS = {
+    "一致危险：尖锐且疼痛": ("下", "尖锐", "完整", .2, .85, .9, .9, .8),
+    "冲突A：看似尖锐但柔软": ("下", "尖锐", "完整", .7, .15, .05, .1, .05),
+    "冲突B：看似圆滑但高压疼痛": ("右", "圆滑", "完整", .15, .9, .9, .9, .1),
+    "一致安全：圆滑且柔软": ("上", "圆滑", "完整", .7, .15, .05, .1, .05),
+}
+
+
+def apply_scene_preset(name):
+    return SCENE_PRESETS[name]
 
 
 def run_full_circuit(direction, sharpness, completeness, brightness, noise,
@@ -53,6 +64,10 @@ def run_full_circuit(direction, sharpness, completeness, brightness, noise,
         f"- **{metal_text}**（{prediction.confidence['metallic']:.1%}）\n\n"
         "#### 跨模态融合结论\n"
         f"- **{danger_text}**（置信度 {prediction.confidence['danger']:.1%}）\n\n"
+        "#### 门控融合权重\n"
+        f"- 视觉 {prediction.modality_weights['vision']:.1%} · "
+        f"触觉 {prediction.modality_weights['touch']:.1%} · "
+        f"嗅觉 {prediction.modality_weights['odor']:.1%}\n\n"
         f"运行后端：{metadata['backend']} · 耗时 {metadata['elapsed_ms']:.2f} ms"
         + (f"\n\n⚠️ {fallback}" if fallback else "")
         + "\n\n> Decoder只接收V1、触觉与嗅觉脉冲，不读取上方控件值或正确标签。"
@@ -61,24 +76,35 @@ def run_full_circuit(direction, sharpness, completeness, brightness, noise,
         visual_input_figure(image), decoder_raster_figure(retina_spikes),
         decoder_v1_raster_figure(v1_spikes),
         decoder_activity_figure(v1_spikes), decoder_edge_maps_figure(v1_spikes),
-        tactile_activity_figure(touch_spikes), decoder_confidence_figure(prediction), conclusion,
+        tactile_activity_figure(touch_spikes), decoder_confidence_figure(prediction),
+        modality_weights_figure(prediction), conclusion,
     )
 
 
 def run_causal_test():
     report = validate_decoder_causality()
-    accuracy = report["accuracies"]
     normal = report["normal_mean"]
     silenced = report["silenced_mean"]
     gap = report["causal_gap"]
     reproducible = "通过" if report["reproducible"] else "失败"
-    verdict = "支持Decoder确实依赖V1信号" if gap >= .20 else "证据不足，需要检查数据泄漏或特征设计"
+    modalities_pass = (
+        gap >= .20
+        and report["accuracies"]["正常"]["pain"] - report["accuracies"]["切断触觉"]["pain"] >= .20
+        and report["accuracies"]["正常"]["metallic"] - report["accuracies"]["切断嗅觉"]["metallic"] >= .20
+    )
+    verdict = ("支持各属性头依赖正确感觉模态" if modalities_pass
+               else "证据不足，需要检查数据泄漏或特征设计")
     text = (
         "### 因果验证报告\n"
         f"- 固定随机种子逐脉冲复现：**{reproducible}**\n"
         f"- {report['samples']}个未见样本，正常V1视觉平均准确率：**{normal:.1%}**\n"
         f"- 切断V1后的视觉平均准确率：**{silenced:.1%}**\n"
         f"- 因果性能差：**{gap:.1%}**\n"
+        f"- 触觉切断后危险准确率：**{report['accuracies']['切断触觉']['danger']:.1%}**\n"
+        f"- 嗅觉切断后危险准确率：**{report['accuracies']['切断嗅觉']['danger']:.1%}**\n"
+        f"- 完整多模态危险准确率：**{report['normal_danger']:.1%}**；"
+        f"最佳单模态：**{max(report['single_danger'].values()):.1%}**\n"
+        f"- 随机标签对照平均准确率：**{report['random_label_accuracy']:.1%}**\n"
         f"- 结论：**{verdict}**\n\n"
         "这里的“学习”仅表示Decoder从训练样本中学会V1脉冲与标签的统计映射；"
         "不代表生物大脑水平的理解。"
@@ -86,10 +112,10 @@ def run_causal_test():
     return causal_validation_figure(report), text
 
 
-with gr.Blocks(title="微型多模态感知回路 v0.5") as demo:
+with gr.Blocks(title="微型多模态感知回路 v0.6") as demo:
     gr.Markdown(
-        "# 微型多模态感知回路 v0.5\n"
-        "同一次运行依次经过 **视网膜 → V1 → 多感觉信号融合 → 感知理解**。"
+        "# 微型多模态感知回路 v0.6\n"
+        "三个独立感觉编码器通过可训练门控融合，并用模态消融与随机标签对照验证学习。"
     )
     with gr.Row():
         with gr.Column(scale=1):
@@ -109,6 +135,8 @@ with gr.Blocks(title="微型多模态感知回路 v0.5") as demo:
             gr.Markdown("## ③ 嗅觉与运行")
             metallic = gr.Slider(0, 1, value=.75, step=.05, label="金属气味强度")
             seed = gr.Number(value=7, precision=0, label="随机种子（用于复现）")
+            preset = gr.Dropdown(list(SCENE_PRESETS), value="一致危险：尖锐且疼痛", label="场景预设")
+            apply_preset = gr.Button("载入场景预设")
             run = gr.Button("运行完整感知回路", variant="primary")
 
     gr.Markdown("## ④ 视觉通路：输入 → 视网膜 → V1输出")
@@ -124,19 +152,22 @@ with gr.Blocks(title="微型多模态感知回路 v0.5") as demo:
     touch_plot = gr.Plot(label="触觉模块64路群体脉冲摘要")
     with gr.Row():
         confidence_plot = gr.Plot(label="九个Decoder输出头")
+        weights_plot = gr.Plot(label="三种感觉贡献权重")
         conclusion = gr.Markdown()
 
     inputs = [direction, sharpness, completeness, brightness, noise,
               area, force, pain, hardness, metallic, seed]
     outputs = [image, retina_plot, v1_raster, v1_activity, v1_edges,
-               touch_plot, confidence_plot, conclusion]
+               touch_plot, confidence_plot, weights_plot, conclusion]
+    preset_outputs = [direction, sharpness, completeness, area, force, pain, hardness, metallic]
+    apply_preset.click(apply_scene_preset, inputs=preset, outputs=preset_outputs)
     run.click(run_full_circuit, inputs, outputs)
     demo.load(run_full_circuit, inputs, outputs)
 
     gr.Markdown("## ⑥ 它真的在学习吗？")
     gr.Markdown(
-        "点击后在未参与训练的样本上比较正常V1、切断V1和打乱V1。"
-        "如果破坏V1后视觉准确率明显下降，说明Decoder确实依赖V1脉冲。"
+        "点击后在未参与训练的样本上分别切断或打乱V1、触觉和嗅觉，"
+        "并与完整多模态、单模态和随机标签训练进行对照。"
     )
     verify = gr.Button("运行因果验证")
     with gr.Row():

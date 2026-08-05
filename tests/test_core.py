@@ -90,6 +90,8 @@ class DecoderTests(unittest.TestCase):
             "direction", "sharpness", "completeness", "area", "force", "pain",
             "hardness", "metallic", "danger"
         })
+        self.assertEqual(set(prediction.modality_weights), {"vision", "touch", "odor"})
+        self.assertAlmostEqual(sum(prediction.modality_weights.values()), 1.0, places=5)
 
     def test_decoder_activity_maps_preserve_spatial_shape(self):
         image = generate_shape("right", "rounded", "open", noise=0, seed=5)
@@ -121,6 +123,28 @@ class DecoderTests(unittest.TestCase):
         self.assertTrue(report["reproducible"])
         self.assertGreaterEqual(report["normal_mean"], .90)
         self.assertGreaterEqual(report["causal_gap"], .30)
+        self.assertGreaterEqual(
+            np.mean([report["accuracies"]["正常"][head]
+                     for head in ("area", "force", "pain", "hardness")]), .90
+        )
+        self.assertLessEqual(report["random_label_accuracy"], .55)
+        self.assertGreater(report["normal_danger"], max(report["single_danger"].values()))
+
+    def test_conflicting_senses_change_learned_gate(self):
+        visual_threat = generate_shape("down", "sharp", "complete", noise=0, seed=21)
+        tactile_threat = generate_shape("right", "rounded", "complete", noise=0, seed=21)
+        first = decode_multimodal(visual_threat, .05, .05, 44,
+                                  area=.7, force=.15, hardness=.1)[0]
+        second = decode_multimodal(tactile_threat, .9, .1, 44,
+                                   area=.15, force=.9, hardness=.9)[0]
+        self.assertGreater(second.modality_weights["touch"],
+                           first.modality_weights["touch"] + .20)
+
+    def test_prediction_is_reproducible(self):
+        image = generate_shape("down", "sharp", "open", seed=30)
+        first = decode_multimodal(image, .7, .2, 101, area=.3, force=.8, hardness=.9)[0]
+        second = decode_multimodal(image, .7, .2, 101, area=.3, force=.8, hardness=.9)[0]
+        self.assertEqual(first, second)
 
 
 if __name__ == "__main__":
